@@ -1,0 +1,14 @@
+.DS_Store
+Cargo.lock
+.private
+
+/target
+
+/asset_source
+/dist
+/.cargo
+*.icns
+*.app/
+*.zip
+.tfstate
+.terraform
