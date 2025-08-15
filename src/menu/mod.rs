@@ -1,6 +1,8 @@
 use crate::app::AppState;
+use crate::app::DARK_COLOR;
 use crate::app::DialogDisplay;
 use crate::app::DisplayLanguage;
+use crate::app::LIGHT_COLOR;
 use crate::app::RESOLUTION_WIDTH;
 use crate::assets::lexi::menu::{Choice, MenuData};
 use bevy::prelude::*;
@@ -86,7 +88,7 @@ fn menu_setup(
 ) {
     info!("Menu");
     info!(language = display_language.0);
-    bg.0 = Color::srgb(0.2, 0.2, 0.2);
+    bg.0 = DARK_COLOR;
     // commands.spawn((StateScoped(AppState::Menu), Camera2d::default()));
 
     commands.send_event(ChangeMenu::new("main menu"));
@@ -200,8 +202,8 @@ fn move_choice_marker(
     display_language: ResMut<DisplayLanguage>,
     dialog_message: Res<ActiveMenu>,
     current_selection: Res<CurrentSelection>,
-    mut button: Query<&mut BackgroundColor>,
-    mut selections: Query<(&mut TextSpan, &ChildOf), With<layouts::MenuOption>>,
+    mut button: Query<(&mut BackgroundColor, &mut BorderColor)>,
+    mut selections: Query<(&mut TextSpan, &mut TextColor, &ChildOf), With<layouts::MenuOption>>,
 ) {
     let Some(current_choice) = &current_selection.0 else {
         return;
@@ -228,20 +230,28 @@ fn move_choice_marker(
         let text = choice.choice.lex.from_language(&display_language.0);
 
         if current_choice.id == choice.id.clone() {
-            for (text_idx, (mut text_span, parent)) in selections.iter_mut().enumerate() {
+            for (text_idx, (mut text_span, mut text_color, parent)) in
+                selections.iter_mut().enumerate()
+            {
                 if idx == text_idx {
                     *text_span = TextSpan::new(format!("> {}", text.clone()));
-                    if let Ok(mut bg) = button.get_mut(parent.0) {
-                        bg.0 = bevy::color::palettes::css::DARK_SLATE_GREY.into();
+                    if let Ok((mut bg, mut border_color)) = button.get_mut(parent.0) {
+                        bg.0 = DARK_COLOR;
+                        border_color.0 = LIGHT_COLOR; // TODO not working
+                        text_color.0 = LIGHT_COLOR;
                     }
                 }
             }
         } else {
-            for (text_idx, (mut text_span, parent)) in selections.iter_mut().enumerate() {
+            for (text_idx, (mut text_span, mut text_color, parent)) in
+                selections.iter_mut().enumerate()
+            {
                 if idx == text_idx {
                     *text_span = TextSpan::new(format!(" {}", text.clone()));
-                    if let Ok(mut bg) = button.get_mut(parent.0) {
-                        bg.0 = bevy::color::palettes::css::CADET_BLUE.into();
+                    if let Ok((mut bg, mut border_color)) = button.get_mut(parent.0) {
+                        bg.0 = LIGHT_COLOR;
+                        border_color.0 = LIGHT_COLOR; // TODO not working
+                        text_color.0 = DARK_COLOR;
                     }
                 }
             }

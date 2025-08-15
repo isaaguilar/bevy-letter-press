@@ -5,29 +5,78 @@ use bevy_asset_loader::prelude::*;
 #[derive(AssetCollection, Resource)]
 
 pub struct ImageAssets {
-    #[asset(path = "placeholder.png")]
+    #[asset(path = "clock.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub clock: Handle<Image>,
 
-    #[asset(path = "placeholder.png")]
+    #[asset(path = "healthbar-Sheet.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub healthbar: Handle<Image>,
+
+    #[asset(texture_atlas_layout(tile_size_x = 101, tile_size_y = 27, columns = 9, rows = 1))]
+    pub healthbar_layout: Handle<TextureAtlasLayout>,
+
+    #[asset(path = "sfx-Sheet.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub sfx: Handle<Image>,
 
     #[asset(texture_atlas_layout(tile_size_x = 18, tile_size_y = 18, columns = 2, rows = 1))]
     pub sfx_layout: Handle<TextureAtlasLayout>,
 
-    #[asset(path = "placeholder.png")]
+    #[asset(path = "volume-Sheet.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub volume: Handle<Image>,
 
+    #[asset(path = "weed1.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub weed1: Handle<Image>,
+
+    #[asset(path = "weed2.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub weed2: Handle<Image>,
+
+    #[asset(path = "weed3_1.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub weed3_1: Handle<Image>,
+
+    #[asset(path = "weed3_2.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub weed3_2: Handle<Image>,
+
+    #[asset(path = "weed3_3.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub weed3_3: Handle<Image>,
+
+    #[asset(path = "weed4.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub weed4: Handle<Image>,
+
+    #[asset(path = "farm.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub farm: Handle<Image>,
+
     #[asset(texture_atlas_layout(tile_size_x = 18, tile_size_y = 18, columns = 2, rows = 1))]
     pub volume_layout: Handle<TextureAtlasLayout>,
+
+    #[asset(path = "letterbox-Sheet.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub letterbox: Handle<Image>,
+
+    #[asset(texture_atlas_layout(tile_size_x = 64, tile_size_y = 64, columns = 9, rows = 1))]
+    pub letterbox_layout: Handle<TextureAtlasLayout>,
+
+    #[asset(path = "letters-Sheet.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub letters: Handle<Image>,
+
+    #[asset(texture_atlas_layout(tile_size_x = 28, tile_size_y = 28, columns = 26, rows = 1))]
+    pub letters_layout: Handle<TextureAtlasLayout>,
 
     #[asset(path = "circle-transition.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub circle_transition: Handle<Image>,
 
-    #[asset(texture_atlas_layout(tile_size_x = 512, tile_size_y = 320, columns = 7, rows = 2))]
+    #[asset(texture_atlas_layout(tile_size_x = 512, tile_size_y = 320, columns = 14, rows = 1))]
     pub circle_transition_layout: Handle<TextureAtlasLayout>,
 }
 

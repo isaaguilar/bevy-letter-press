@@ -1,5 +1,7 @@
 use bevy::{asset::AssetMetaCheck, prelude::*, window::WindowResolution};
-use bevy_aspect_ratio_mask::{AspectRatioPlugin, Resolution};
+use bevy_aspect_ratio_mask::{AspectRatioMask, AspectRatioPlugin, Resolution};
+
+const TITLE: &str = "Whack-A-Weed";
 
 pub const RESOLUTION_WIDTH: f32 = 640.0;
 pub const RESOLUTION_HEIGHT: f32 = 480.0;
@@ -8,7 +10,9 @@ pub const RUNNING_SPEED: f32 = 250.0;
 
 use crate::{assets, game, menu, util};
 
-const TITLE: &str = "The Dino Game";
+pub const DARK_COLOR: Color = Color::srgb(24. / 255., 51. / 255., 5. / 255.);
+pub const LIGHT_COLOR: Color = Color::srgb(214. / 255., 227. / 255., 195. / 255.);
+pub const CLEAR_COLOR: Color = Color::srgba(0.0, 0.0, 0.0, 0.0);
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 #[states(scoped_entities)]
@@ -51,6 +55,9 @@ pub fn start() {
                 resolution: Resolution {
                     width: RESOLUTION_WIDTH,
                     height: RESOLUTION_HEIGHT,
+                },
+                mask: AspectRatioMask {
+                    color: Color::srgba(24. / 255., 51. / 255., 5. / 255., 0.0),
                 },
                 ..default()
             },

@@ -1,5 +1,5 @@
 use super::{Choice, SelectionMarker};
-use crate::app::RESOLUTION_HEIGHT;
+use crate::app::{DARK_COLOR, LIGHT_COLOR, RESOLUTION_HEIGHT};
 use crate::util::handles::BODY_FONT;
 use bevy::{prelude::*, ui::Val::*};
 
@@ -43,6 +43,7 @@ pub fn button_layout(text: &str, choice: Choice) -> impl Bundle {
             // justify_self: JustifySelf::Center,
             width: Val::Px(200.0),
             left: Val::Px(200.),
+            border: UiRect::all(Val::Px(2.0)),
             margin: UiRect::new(Val::Px(0.0), Val::Px(2.0), Val::Px(5.0), Val::Px(5.0)),
             // margin: UiRect::vertical(Px(1.0)),
             ..default()
@@ -51,10 +52,12 @@ pub fn button_layout(text: &str, choice: Choice) -> impl Bundle {
         TextLayout::default().with_justify(JustifyText::Center),
         Text::default(),
         SelectionMarker(choice),
+        BorderColor(LIGHT_COLOR),
         BorderRadius::MAX,
-        BorderColor(Color::BLACK),
+        BackgroundColor(DARK_COLOR),
         children![(
             MenuOption,
+            TextColor(LIGHT_COLOR),
             TextFont::from_font(BODY_FONT)
                 .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
                 .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
@@ -78,6 +81,7 @@ pub fn header_layout(text: &str) -> impl Bundle {
         TextLayout::default().with_justify(JustifyText::Center),
         Text::default(),
         children![(
+            TextColor(LIGHT_COLOR),
             TextFont::from_font(BODY_FONT)
                 .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
                 .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
