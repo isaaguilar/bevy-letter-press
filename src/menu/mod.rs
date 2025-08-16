@@ -4,6 +4,7 @@ use crate::app::DialogDisplay;
 use crate::app::DisplayLanguage;
 use crate::app::LIGHT_COLOR;
 use crate::app::RESOLUTION_WIDTH;
+use crate::assets::custom::ImageAssets;
 use crate::assets::lexi::menu::{Choice, MenuData};
 use bevy::prelude::*;
 use bevy_aspect_ratio_mask::Hud;
@@ -103,6 +104,7 @@ fn change_menu(
     menu_data: Res<Assets<MenuData>>,
     dialog_display_query: Query<(Entity, &DialogDisplay), With<DialogDisplay>>,
     hud: Res<Hud>,
+    image_assets: Res<ImageAssets>,
 ) {
     info!("Spawning menu");
     let hud_entity = hud.0;
@@ -140,6 +142,26 @@ fn change_menu(
 
     let padding_x = RESOLUTION_WIDTH / 32.0;
     commands.entity(hud_entity).with_children(|parent| {
+        if *menu_id == "main menu" {
+            parent.spawn((
+                StateScoped(AppState::Menu),
+                DialogDisplay(dialog.id.clone()),
+                Node {
+                    position_type: PositionType::Relative,
+                    height: Val::Px(324.0),
+                    width: Val::Px(450.0),
+                    left: Val::Px(85.),
+                    top: Val::Px(-25.),
+                    // margin: UiRect::new(Val::Px(0.0), Val::Px(2.0), Val::Px(5.0), Val::Px(-120.0)),
+                    ..default()
+                },
+                ImageNode {
+                    image: image_assets.title.clone(),
+                    ..default()
+                },
+            ));
+        }
+
         parent
             .spawn((
                 StateScoped(AppState::Menu),
@@ -156,38 +178,40 @@ fn change_menu(
                         for (_index, choice) in choices.iter().enumerate() {
                             let text = choice.choice.lex.from_language(&display_language.0);
 
-                            let mut button =
-                                p.spawn((layouts::button_layout(&text, choice.clone()),));
-                            button.observe(inputs::mouse_move);
-                            button.observe(inputs::mouse_over);
+                            p.spawn((layouts::button_layout(&text, choice.clone())))
+                                .with_children(|p| {
+                                    let mut button =
+                                        p.spawn(layouts::button_text(&text, choice.clone()));
+                                    button.observe(inputs::mouse_move);
+                                    button.observe(inputs::mouse_over);
+                                    match &choice.choice.action {
+                                        Some(action) => match action.as_str() {
+                                            "start_game" => {
+                                                button.observe(inputs::click_start_game);
+                                            }
+                                            "show_credits" => {
+                                                button.observe(inputs::click_show_credits);
+                                            }
 
-                            match &choice.choice.action {
-                                Some(action) => match action.as_str() {
-                                    "start_game" => {
-                                        button.observe(inputs::click_start_game);
-                                    }
-                                    "show_credits" => {
-                                        button.observe(inputs::click_show_credits);
+                                            "english" | "spanish" => {
+                                                button
+                                                    .insert(Language::new(action))
+                                                    .observe(inputs::click_language_selection);
+                                            }
+                                            _ => {}
+                                        },
+                                        None => {}
                                     }
 
-                                    "english" | "spanish" => {
-                                        button
-                                            .insert(Language::new(action))
-                                            .observe(inputs::click_language_selection);
+                                    match &choice.choice.next_id {
+                                        Some(id) => {
+                                            button
+                                                .insert(GoToMenu::new(id))
+                                                .observe(inputs::click_menu_selection);
+                                        }
+                                        None => {}
                                     }
-                                    _ => {}
-                                },
-                                None => {}
-                            }
-
-                            match &choice.choice.next_id {
-                                Some(id) => {
-                                    button
-                                        .insert(GoToMenu::new(id))
-                                        .observe(inputs::click_menu_selection);
-                                }
-                                None => {}
-                            }
+                                });
                         }
                     }
                     None => {}
@@ -202,7 +226,7 @@ fn move_choice_marker(
     display_language: ResMut<DisplayLanguage>,
     dialog_message: Res<ActiveMenu>,
     current_selection: Res<CurrentSelection>,
-    mut button: Query<(&mut BackgroundColor, &mut BorderColor)>,
+    mut button: Query<&mut BackgroundColor>,
     mut selections: Query<(&mut TextSpan, &mut TextColor, &ChildOf), With<layouts::MenuOption>>,
 ) {
     let Some(current_choice) = &current_selection.0 else {
@@ -235,9 +259,8 @@ fn move_choice_marker(
             {
                 if idx == text_idx {
                     *text_span = TextSpan::new(format!("> {}", text.clone()));
-                    if let Ok((mut bg, mut border_color)) = button.get_mut(parent.0) {
+                    if let Ok(mut bg) = button.get_mut(parent.0) {
                         bg.0 = DARK_COLOR;
-                        border_color.0 = LIGHT_COLOR; // TODO not working
                         text_color.0 = LIGHT_COLOR;
                     }
                 }
@@ -248,9 +271,8 @@ fn move_choice_marker(
             {
                 if idx == text_idx {
                     *text_span = TextSpan::new(format!(" {}", text.clone()));
-                    if let Ok((mut bg, mut border_color)) = button.get_mut(parent.0) {
+                    if let Ok(mut bg) = button.get_mut(parent.0) {
                         bg.0 = LIGHT_COLOR;
-                        border_color.0 = LIGHT_COLOR; // TODO not working
                         text_color.0 = DARK_COLOR;
                     }
                 }

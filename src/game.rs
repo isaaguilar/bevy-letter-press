@@ -7,26 +7,27 @@ use crate::app::{
 use crate::assets::custom::{ImageAssets, SoundAssets};
 use crate::assets::lexi::game_over::GameOverLex;
 use crate::assets::lexi::levels::{LevelInfo, LevelLex};
-use crate::camera;
 use crate::util::handles::BODY_FONT;
+use crate::{camera, game};
 use bevy::ecs::system::Commands;
-use bevy::input::ButtonInput;
 use bevy::input::ButtonState;
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::input::keyboard::KeyboardInput;
+use bevy::input::{ButtonInput, keyboard};
 use bevy::math::bounding::{Aabb2d, IntersectsVolume};
 use bevy::platform::collections::HashMap;
 
 use bevy::render::render_resource::Texture;
 use bevy::sprite::Sprite;
 use bevy::ui::{AlignItems, Display, FlexDirection, Node, PositionType, Val};
-use bevy::{audio, prelude::*};
+use bevy::{audio, image, prelude::*};
 use bevy_aspect_ratio_mask::Hud;
 use bevy_http_client::prelude::*;
 use bevy_simple_text_input::{
     TextInput, TextInputPlugin, TextInputTextColor, TextInputTextFont, TextInputValue,
 };
 use rand::Rng;
+use rand::prelude::IndexedMutRandom;
 use rand::seq::IndexedRandom;
 use serde::Deserialize;
 
@@ -38,6 +39,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_state::<GameState>()
         .add_event::<SceneChange>()
         .add_event::<RemoveWeed>()
+        .add_event::<GrowWeed>()
         .add_plugins((TextInputPlugin, HttpClientPlugin))
         .insert_resource(LoadedLevel::default())
         .insert_resource(GameTimer::default())
@@ -52,8 +54,14 @@ pub(super) fn plugin(app: &mut App) {
         .insert_resource(KeyMap::default())
         .insert_resource(KeyPosition::default())
         .insert_resource(WeedTracker::default())
+        .insert_resource(HideInstructions::default())
         .add_systems(Startup, global_volume_set)
-        .add_systems(OnEnter(AppState::Game), (sfx_setup, setup))
+        .add_systems(Update, grow_weed.run_if(on_event::<GrowWeed>))
+        .add_systems(Update, weed_animation)
+        .add_systems(
+            OnEnter(AppState::Game),
+            (sfx_setup, setup, instructions_box),
+        )
         .add_systems(Startup, camera::game_camera)
         .add_systems(
             Update,
@@ -63,20 +71,33 @@ pub(super) fn plugin(app: &mut App) {
                     .and(in_state(AppState::Game)),
             ),
         )
-        .add_systems(Update, remove_weeds.run_if(on_event::<RemoveWeed>))
+        .add_systems(Update, wack_weed.run_if(on_event::<RemoveWeed>))
         .add_systems(
             Update,
             (
                 // keypress_events,
+                level_timer_countdown,
                 level_timer_counter,
                 animate_key,
                 update_healthbar_display,
                 update_letters_remaining_display,
-                level_timer_countdown,
+                update_rose_grows_display,
                 update_timeboard,
-                update_affirmation_display,
             )
                 .run_if(in_state(AppState::Game).and(in_state(GameState::Running))),
+        )
+        .add_systems(
+            Update,
+            (
+                instructions_box_animation,
+                animate_key,
+                update_affirmation_display,
+            )
+                .run_if(in_state(AppState::Game)),
+        )
+        .add_systems(
+            Update,
+            regrow_rose.run_if(in_state(GameState::LevelComplete).and(in_state(AppState::Game))),
         )
         .add_systems(Update, game_over.run_if(on_event::<SceneChange>))
         .add_systems(Update, scene_transition)
@@ -88,8 +109,10 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnEnter(AppState::LoadNextLevel), setup_load_next_level)
         .add_systems(
             Update,
-            load_next_level
-                .run_if(on_event::<KeyboardInput>.and(in_state(AppState::LoadNextLevel))),
+            load_next_level.run_if(
+                on_event::<KeyboardInput>
+                    .and(in_state(AppState::LoadNextLevel).and(in_state(GameState::NextLevel))),
+            ),
         )
         .add_systems(OnEnter(AppState::GameOver), setup_game_over)
         .add_systems(
@@ -108,11 +131,13 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[states(scoped_entities)]
 pub enum GameState {
     Running,
     #[default]
     NotRunning,
     LevelComplete,
+    NextLevel,
 }
 
 #[derive(Component)]
@@ -127,13 +152,12 @@ pub fn press_space_to_start(
     query: Query<Entity, With<SpaceToStart>>,
 ) {
     for entity in query {
-        commands.entity(entity).despawn()
+        commands.entity(entity).despawn();
+        game_state.set(GameState::Running);
     }
-    game_state.set(GameState::Running);
 }
 
 pub fn global_volume_set(mut volume: ResMut<GlobalVolume>) {
-    info!("Set Vol");
     volume.volume = bevy::audio::Volume::Linear(0.50); // Sets global volume to 50%
 }
 
@@ -147,7 +171,7 @@ impl Default for SfxMusicVolume {
     fn default() -> Self {
         Self {
             music: false,
-            sfx: false,
+            sfx: true,
         }
     }
 }
@@ -286,7 +310,8 @@ pub fn sfx_setup(
     if music.single().is_err() {
         commands.spawn((
             GameMusic,
-            MusicVolume(1.2),
+            // MusicVolume(1.2),
+            MusicVolume(0.0),
             FadeInMusic::new(1.2),
             PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.0)),
             AudioPlayer(sound_assets.music.clone()),
@@ -310,6 +335,7 @@ pub fn setup(
     mut game_timer: ResMut<GameTimer>,
     mut active_key: ResMut<ActiveKey>,
     mut time_spent: ResMut<TimeSpent>,
+    hide_instructions: Res<HideInstructions>,
 ) {
     time_spent.0.clear();
     weeds_left.reset();
@@ -376,7 +402,6 @@ pub fn setup(
             ))
             .with_children(|p| {
                 p.spawn((
-                    LettersRemainingDisplay,
                     TextColor(LIGHT_COLOR),
                     TextFont::from_font(BODY_FONT)
                         .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
@@ -470,28 +495,30 @@ pub fn setup(
                 ));
             });
 
-        parent
-            .spawn((
-                StateScoped(AppState::Game),
-                Node {
-                    position_type: PositionType::Absolute,
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Column,
-                    width: Val::Percent(100.0),
-                    top: Val::Px(100.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-            ))
-            .with_children(|p| {
-                p.spawn((
-                    SpaceToStart,
-                    TextColor(LIGHT_COLOR),
-                    TextFont::from_font(BODY_FONT)
-                        .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 15.),
-                    Text("Press Spacebar to Start".into()),
-                ));
-            });
+        if hide_instructions.0 {
+            parent
+                .spawn((
+                    StateScoped(AppState::Game),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Column,
+                        width: Val::Percent(100.0),
+                        top: Val::Px(100.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                ))
+                .with_children(|p| {
+                    p.spawn((
+                        SpaceToStart,
+                        TextColor(LIGHT_COLOR),
+                        TextFont::from_font(BODY_FONT)
+                            .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 15.),
+                        Text("Press Spacebar to Start".into()),
+                    ));
+                });
+        }
     });
 
     let mut rng = rand::rng();
@@ -500,7 +527,9 @@ pub fn setup(
 
     let mut weed_x_placements = Vec::new();
 
-    while weed_x_placements.len() < MAX_VISIBLE_WEEDS as usize {
+    weeds_left.max = MAX_VISIBLE_WEEDS.min(level_info.count);
+
+    while weed_x_placements.len() < weeds_left.max as usize {
         let candidate = if rng.random_bool(0.5) {
             rng.random_range(-RESOLUTION_WIDTH / 2.0..=-50.0)
         } else {
@@ -515,25 +544,27 @@ pub fn setup(
         }
     }
 
-    // let weed_x_placements = (0..MAX_VISIBLE_WEEDS)
-    //     .map(|_| {
-
-    //         if rng.random_bool(0.5) {
-    //             rng.random_range(-RESOLUTION_WIDTH / 2.0..=-50.0)
-    //         } else {
-    //             rng.random_range(50.0..=RESOLUTION_WIDTH / 2.0)
-    //         }
-
-    //     })
-    //     .collect::<Vec<f32>>();
-
     let weeds = vec![
-        image_assets.weed1.clone(),
-        image_assets.weed2.clone(),
-        image_assets.weed3_1.clone(),
-        image_assets.weed3_2.clone(),
-        image_assets.weed3_3.clone(),
-        image_assets.weed4.clone(),
+        (
+            image_assets.weed1.clone(),
+            image_assets.weed1_layout.clone(),
+        ),
+        (
+            image_assets.weed2.clone(),
+            image_assets.weed2_layout.clone(),
+        ),
+        (
+            image_assets.weed3.clone(),
+            image_assets.weed3_layout.clone(),
+        ),
+        (
+            image_assets.weed4.clone(),
+            image_assets.weed4_layout.clone(),
+        ),
+        (
+            image_assets.weed5.clone(),
+            image_assets.weed5_layout.clone(),
+        ),
     ];
     for x in weed_x_placements {
         let image = weeds.choose(&mut rng).unwrap();
@@ -542,11 +573,15 @@ pub fn setup(
 
         commands.spawn((
             StateScoped(AppState::Game),
-            Weed,
+            Weed::default(),
             Transform::from_translation(Vec3::new(x, -20.0, 0.0)),
             Sprite {
                 flip_x: flip_x,
-                image: image.clone(),
+                image: image.0.clone(),
+                texture_atlas: Some(TextureAtlas {
+                    layout: image.1.clone(),
+                    index: 4,
+                }),
                 ..default()
             },
         ));
@@ -561,13 +596,156 @@ pub fn setup(
 
     commands.spawn((
         StateScoped(AppState::Game),
-        Transform::from_translation(Vec3::new(0.0, 0.0, -10.0)),
+        RoseGrows::default(),
+        Transform::from_translation(Vec3::new(0.0, -40.0, -10.0)),
         Sprite {
-            image: image_assets.farm.clone(),
+            image: image_assets.rose.clone(),
+            texture_atlas: Some(TextureAtlas {
+                layout: image_assets.rose_layout.clone(),
+                index: 0,
+            }),
             ..default()
         },
     ));
-    info!(count = level_info.count, visible = weeds_left.visible);
+}
+
+#[derive(Resource, Default)]
+pub struct HideInstructions(pub bool);
+
+fn instructions_box(
+    mut commands: Commands,
+    hud: Res<Hud>,
+    image_assets: Res<ImageAssets>,
+    mut hide_instructions: ResMut<HideInstructions>,
+) {
+    if hide_instructions.0 {
+        return;
+    } else {
+        hide_instructions.0 = true;
+    }
+    commands.spawn((
+        StateScoped(GameState::NotRunning),
+        Instructions::default(),
+        Transform::from_translation(Vec3::new(0.0, -35.0, 12.0)),
+        Sprite {
+            image: image_assets.instructions.clone(),
+            texture_atlas: Some(TextureAtlas {
+                layout: image_assets.instructions_layout.clone(),
+                index: 0,
+            }),
+            ..default()
+        },
+    ));
+}
+
+fn instructions_box_animation(
+    mut commands: Commands,
+    hud: Res<Hud>,
+    time: Res<Time>,
+    mut instructions_query: Query<(&mut Sprite, &mut Instructions)>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    let spacebar_pressed = keyboard_input.just_pressed(KeyCode::Space);
+    if let Ok((mut sprite, mut instructions)) = instructions_query.single_mut() {
+        instructions.screen_change_wait_timer.tick(time.delta());
+
+        instructions.timer.tick(time.delta());
+
+        match instructions.message {
+            InstructionMessage::Intro => {
+                if spacebar_pressed || instructions.screen_change_wait_timer.just_finished() {
+                    instructions.message = InstructionMessage::Bloom;
+                    return;
+                }
+            }
+            InstructionMessage::Bloom => {
+                instructions.bloom_screen_wait_timer.tick(time.delta());
+                if instructions.timer.just_finished() {
+                    if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                        if atlas.index < 2 {
+                            atlas.index = 2
+                        } else if atlas.index >= 2 && atlas.index < 6 {
+                            atlas.index += 1;
+                        }
+                        if atlas.index == 6 {
+                            atlas.index = 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (spacebar_pressed && !instructions.bloom_screen_wait_timer.finished())
+            || instructions.bloom_screen_wait_timer.finished()
+        {
+            commands.entity(hud.0).with_children(|parent| {
+                parent
+                    .spawn((
+                        StateScoped(GameState::NotRunning),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            display: Display::Flex,
+                            flex_direction: FlexDirection::Column,
+                            width: Val::Percent(100.0),
+                            top: Val::Px(350.0),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|p| {
+                        p.spawn((
+                            SpaceToStart,
+                            TextColor(LIGHT_COLOR),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 15.),
+                            Text("Press Spacebar to Start".into()),
+                        ));
+                    });
+            });
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct Instructions {
+    pub message: InstructionMessage,
+    pub timer: Timer,
+    pub screen_change_wait_timer: Timer,
+    pub bloom_screen_wait_timer: Timer,
+}
+
+impl Default for Instructions {
+    fn default() -> Self {
+        Self {
+            message: InstructionMessage::Intro,
+            timer: Timer::from_seconds(0.15, TimerMode::Repeating),
+            screen_change_wait_timer: Timer::from_seconds(6.0, TimerMode::Repeating),
+            bloom_screen_wait_timer: Timer::from_seconds(1.5, TimerMode::Once),
+        }
+    }
+}
+
+#[derive(Eq, PartialEq)]
+pub enum InstructionMessage {
+    Intro,
+    Bloom,
+}
+
+#[derive(Component)]
+pub struct RoseGrows {
+    pub timer: Timer,
+    pub start_end_timer: bool,
+    pub end_timer: Timer,
+}
+
+impl Default for RoseGrows {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.15, TimerMode::Repeating),
+            start_end_timer: false,
+            end_timer: Timer::from_seconds(1.15, TimerMode::Once),
+        }
+    }
 }
 
 #[derive(Component)]
@@ -581,6 +759,7 @@ pub struct TimeSpent(pub HashMap<usize, f32>);
 
 #[derive(Resource, Default)]
 pub struct WeedTracker {
+    pub max: u32,
     pub visible: u32,
     pub non_visible: u32,
 }
@@ -595,7 +774,43 @@ impl WeedTracker {
 }
 
 #[derive(Component)]
-pub struct Weed;
+pub struct Weed {
+    pub plant_growth: PlantGrowth,
+    pub timer: Timer,
+}
+
+impl Default for Weed {
+    fn default() -> Self {
+        Self {
+            plant_growth: PlantGrowth::FullGrown,
+            timer: Timer::from_seconds(0.15, TimerMode::Repeating),
+        }
+    }
+}
+
+impl Weed {
+    pub fn is_growing(&self) -> bool {
+        self.plant_growth == PlantGrowth::Growing
+    }
+
+    pub fn is_wacked(&self) -> bool {
+        self.plant_growth == PlantGrowth::Wacked
+    }
+
+    pub fn new() -> Self {
+        Self {
+            plant_growth: PlantGrowth::Growing,
+            timer: Timer::from_seconds(0.15, TimerMode::Repeating),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq)]
+pub enum PlantGrowth {
+    Growing,
+    FullGrown,
+    Wacked,
+}
 
 #[derive(Component)]
 pub struct ActiveKeyDisplay;
@@ -799,7 +1014,7 @@ impl Default for KeyPosition {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct AffirmationMarker {
     pub timer: Timer,
     pub affirmation: String,
@@ -811,7 +1026,7 @@ impl AffirmationMarker {
         Self {
             timer: Timer::from_seconds(1.0, TimerMode::Once),
             affirmation: s.into(),
-            pos_y: 210.0,
+            pos_y: 350.0,
         }
     }
 }
@@ -892,6 +1107,9 @@ pub fn keypress_events(
     image_assets: Res<ImageAssets>,
     mut letterboxes: Query<&mut Letterbox>,
     mut weeds_left: ResMut<WeedTracker>,
+    mut game_state: ResMut<NextState<GameState>>,
+    mut sfx_music_volume: ResMut<SfxMusicVolume>,
+    sound_assets: Res<SoundAssets>,
 ) {
     for event in events.read() {
         let Some(level) = current_level.0.as_mut() else {
@@ -924,7 +1142,6 @@ pub fn keypress_events(
                             ..default()
                         },
                     ));
-                    info!("rendered");
                 };
             }
             return;
@@ -937,6 +1154,13 @@ pub fn keypress_events(
         let pressed_keycode = event.key_code;
 
         if target == pressed_keycode {
+            let vol = if sfx_music_volume.sfx { 2.0 } else { 0.0 };
+
+            commands.spawn((
+                PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(vol)),
+                AudioPlayer(sound_assets.collect_sfx.clone()),
+            ));
+
             for mut letterbox in letterboxes.iter_mut() {
                 letterbox.state = ActiveKeyMarker::Out;
             }
@@ -950,7 +1174,11 @@ pub fn keypress_events(
                 // Move on to next level
 
                 active_key.reset();
-                commands.send_event(SceneChange(AppState::LoadNextLevel));
+
+                // set state of running to the other one
+                game_state.set(GameState::LevelComplete);
+                return;
+                // commands.send_event(SceneChange(AppState::LoadNextLevel));
             } else {
                 display_affirmation.0 = Some(affimation);
                 if let Ok(next_key) = active_key.set_random(&key_map, &level) {
@@ -973,50 +1201,102 @@ pub fn keypress_events(
                             ..default()
                         },
                     ));
-                    info!("rendered");
                 };
             }
         } else {
             //
             // render a permanent weed
             //
+            let vol = if sfx_music_volume.sfx { 2.0 } else { 0.0 };
+
+            commands.spawn((
+                PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(vol)),
+                AudioPlayer(sound_assets.error.clone()),
+            ));
             commands.send_event(RemoveWeed);
             weeds_left.non_visible += 1;
             level.fail_count += 1;
             if level.fail_count >= level.max_fail {
                 active_key.reset();
-                info!("Lose");
+                // info!("Lose");
                 commands.send_event(SceneChange(AppState::GameOver));
             }
         }
     }
 }
 
-fn remove_weeds(
+fn weed_animation(
+    mut commands: Commands,
+    time: Res<Time>,
+    weeds: Query<(Entity, &mut Sprite, &mut Weed)>,
+) {
+    for (entity, mut sprite, mut weed) in weeds {
+        weed.timer.tick(time.delta());
+        if weed.is_growing() {
+            if weed.timer.just_finished() {
+                if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                    if atlas.index < 4 {
+                        atlas.index += 1;
+                    } else if atlas.index == 4 {
+                        weed.plant_growth = PlantGrowth::FullGrown;
+                    }
+                }
+            }
+        } else if weed.is_wacked() {
+            if weed.timer.just_finished() {
+                if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                    if atlas.index > 3 && atlas.index < 8 {
+                        atlas.index += 1;
+                    } else if atlas.index < 4 {
+                        atlas.index = 4;
+                    } else if atlas.index == 8 {
+                        commands.entity(entity).despawn();
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn wack_weed(mut commands: Commands, mut weeds: Query<&mut Weed>) {
+    let mut rng = rand::rng();
+    let mut unwacked: Vec<_> = weeds.iter_mut().filter(|weed| !weed.is_wacked()).collect();
+
+    if let Some(mut weed) = unwacked.choose_mut(&mut rng) {
+        weed.plant_growth = PlantGrowth::Wacked;
+        commands.send_event(GrowWeed);
+    }
+}
+
+#[derive(Event)]
+pub struct GrowWeed;
+
+fn grow_weed(
     mut commands: Commands,
     image_assets: Res<ImageAssets>,
-    weeds: Query<(Entity, &Transform), With<Weed>>,
+    weeds: Query<(&Transform, &mut Weed), With<Weed>>,
     mut weed_tracker: ResMut<WeedTracker>,
 ) {
     let mut rng = rand::rng();
-    let i = weeds.into_iter().map(|e| e).collect::<Vec<_>>();
-    let mut visible_weeds = i.len();
 
-    if let Some((entity, transform)) = i.choose(&mut rng) {
-        commands.entity(*entity).despawn();
-        visible_weeds -= 1;
-    }
-
-    let current_placements = i
+    let visible_weeds = weeds
         .iter()
-        .map(|(_, transform)| transform.translation.x)
+        .filter(|(_, weed)| !weed.is_wacked())
         .collect::<Vec<_>>();
 
-    if weed_tracker.non_visible > 0 && visible_weeds <= MAX_VISIBLE_WEEDS as usize - 1 {
-        let weeds_to_place = if visible_weeds == MAX_VISIBLE_WEEDS as usize - 1 {
+    let mut visible_weed_count = visible_weeds.len();
+
+    let current_placements = visible_weeds
+        .iter()
+        .map(|(transform, _)| transform.translation.x)
+        .collect::<Vec<_>>();
+
+    if weed_tracker.non_visible > 0 && visible_weed_count <= weed_tracker.max as usize - 1 {
+        let weeds_to_place = if visible_weed_count == weed_tracker.max as usize - 1 {
             1
         } else {
-            if visible_weeds as u32 + weed_tracker.non_visible <= MAX_VISIBLE_WEEDS {
+            if visible_weed_count as u32 + weed_tracker.non_visible <= weed_tracker.max {
                 weed_tracker.non_visible
             } else {
                 5.min(weed_tracker.non_visible)
@@ -1043,12 +1323,26 @@ fn remove_weeds(
             }
 
             let weeds = vec![
-                image_assets.weed1.clone(),
-                image_assets.weed2.clone(),
-                image_assets.weed3_1.clone(),
-                image_assets.weed3_2.clone(),
-                image_assets.weed3_3.clone(),
-                image_assets.weed4.clone(),
+                (
+                    image_assets.weed1.clone(),
+                    image_assets.weed1_layout.clone(),
+                ),
+                (
+                    image_assets.weed2.clone(),
+                    image_assets.weed2_layout.clone(),
+                ),
+                (
+                    image_assets.weed3.clone(),
+                    image_assets.weed3_layout.clone(),
+                ),
+                (
+                    image_assets.weed4.clone(),
+                    image_assets.weed4_layout.clone(),
+                ),
+                (
+                    image_assets.weed5.clone(),
+                    image_assets.weed5_layout.clone(),
+                ),
             ];
 
             let image = weeds.choose(&mut rng).unwrap();
@@ -1057,22 +1351,26 @@ fn remove_weeds(
 
             commands.spawn((
                 StateScoped(AppState::Game),
-                Weed,
+                Weed::new(),
                 Transform::from_translation(Vec3::new(x, -20.0, 0.0)),
                 Sprite {
                     flip_x: flip_x,
-                    image: image.clone(),
+                    image: image.0.clone(),
+                    texture_atlas: Some(TextureAtlas {
+                        layout: image.1.clone(),
+                        index: 0,
+                    }),
                     ..default()
                 },
             ));
 
-            visible_weeds += 1;
+            visible_weed_count += 1;
             if weed_tracker.non_visible > 0 {
                 weed_tracker.non_visible -= 1;
             }
         }
     }
-    weed_tracker.visible = visible_weeds as u32;
+    weed_tracker.visible = visible_weed_count as u32;
 }
 
 #[derive(Event)]
@@ -1181,16 +1479,17 @@ fn update_affirmation_display(
     }
 
     commands.entity(hud.0).with_children(|parent| {
+        let affirmation_marker = AffirmationMarker::new(affirmation.clone());
         parent
             .spawn((
                 StateScoped(AppState::Game),
-                AffirmationMarker::new(affirmation.clone()),
+                affirmation_marker.clone(),
                 Node {
                     position_type: PositionType::Absolute,
                     display: Display::Flex,
                     flex_direction: FlexDirection::Column,
                     width: Val::Percent(100.0),
-                    top: Val::Px(210.0),
+                    top: Val::Px(affirmation_marker.pos_y),
                     align_items: AlignItems::Center,
                     ..default()
                 },
@@ -1220,6 +1519,57 @@ fn update_letters_remaining_display(
     };
 
     letters_remaining_text.0 = format!("Left: {}", weed_tracker.total());
+}
+
+fn regrow_rose(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut game_state: ResMut<NextState<GameState>>,
+    mut rose: Query<(&mut Sprite, &mut RoseGrows)>,
+) {
+    let Ok((mut sprite, mut rose_grows)) = rose.single_mut() else {
+        return;
+    };
+
+    if rose_grows.start_end_timer {
+        rose_grows.end_timer.tick(time.delta());
+
+        if rose_grows.end_timer.just_finished() {
+            game_state.set(GameState::NextLevel);
+            commands.send_event(SceneChange(AppState::LoadNextLevel));
+        }
+    }
+
+    rose_grows.timer.tick(time.delta());
+    if rose_grows.timer.just_finished() {
+        if let Some(atlas) = sprite.texture_atlas.as_mut() {
+            if atlas.index < 9 {
+                atlas.index += 1;
+            } else if atlas.index == 9 {
+                rose_grows.start_end_timer = true;
+            }
+        }
+    }
+}
+
+fn update_rose_grows_display(
+    mut commands: Commands,
+    time: Res<Time>,
+    hud: Res<Hud>,
+    mut weed_tracker: ResMut<WeedTracker>,
+    mut rose: Query<(&mut Sprite), With<RoseGrows>>,
+) {
+    let Ok(mut sprite) = rose.single_mut() else {
+        return;
+    };
+
+    if weed_tracker.visible < 9 {
+        if let Some(atlas) = sprite.texture_atlas.as_mut() {
+            if atlas.index < 7 {
+                atlas.index = 9 - weed_tracker.visible as usize;
+            }
+        }
+    }
 }
 
 fn update_healthbar_display(
@@ -1390,7 +1740,8 @@ fn waiting_music(
     if music.single().is_err() {
         commands.spawn((
             WaitingMusic,
-            MusicVolume(0.25),
+            // MusicVolume(0.25),
+            MusicVolume(0.0),
             FadeInMusic::new(0.25),
             PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.0)),
             AudioPlayer(sound_assets.menu_music.clone()),
@@ -1548,8 +1899,6 @@ fn setup_load_next_level(
     current_level_id: Res<CurrentLevelId>,
     loaded_level: Res<LoadedLevel>,
 ) {
-    game_state.set(GameState::NotRunning);
-
     let mut score = 0;
     let time_spent_text = match time_spent.0.get(&current_level_id.0) {
         Some(t) => {
@@ -1678,11 +2027,13 @@ fn setup_game_over(
 fn load_next_level(
     mut events: EventReader<KeyboardInput>,
     mut current_level_id: ResMut<CurrentLevelId>,
+    mut game_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
 ) {
     for event in events.read() {
         if event.state != ButtonState::Released {
             current_level_id.0 += 1;
+            game_state.set(GameState::NotRunning);
             commands.send_event(SceneChange(AppState::Game));
         }
     }

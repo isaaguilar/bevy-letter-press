@@ -5,6 +5,10 @@ use bevy_asset_loader::prelude::*;
 #[derive(AssetCollection, Resource)]
 
 pub struct ImageAssets {
+    #[asset(path = "title.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub title: Handle<Image>,
+
     #[asset(path = "clock.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub clock: Handle<Image>,
@@ -27,29 +31,40 @@ pub struct ImageAssets {
     #[asset(image(sampler(filter = nearest)))]
     pub volume: Handle<Image>,
 
-    #[asset(path = "weed1.png")]
+    #[asset(path = "weed1-Sheet.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub weed1: Handle<Image>,
 
-    #[asset(path = "weed2.png")]
+    #[asset(texture_atlas_layout(tile_size_x = 250, tile_size_y = 480, columns = 9, rows = 1))]
+    pub weed1_layout: Handle<TextureAtlasLayout>,
+
+    #[asset(path = "weed2-Sheet.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub weed2: Handle<Image>,
 
-    #[asset(path = "weed3_1.png")]
-    #[asset(image(sampler(filter = nearest)))]
-    pub weed3_1: Handle<Image>,
+    #[asset(texture_atlas_layout(tile_size_x = 400, tile_size_y = 480, columns = 9, rows = 1))]
+    pub weed2_layout: Handle<TextureAtlasLayout>,
 
-    #[asset(path = "weed3_2.png")]
+    #[asset(path = "weed3-Sheet.png")]
     #[asset(image(sampler(filter = nearest)))]
-    pub weed3_2: Handle<Image>,
+    pub weed3: Handle<Image>,
 
-    #[asset(path = "weed3_3.png")]
-    #[asset(image(sampler(filter = nearest)))]
-    pub weed3_3: Handle<Image>,
+    #[asset(texture_atlas_layout(tile_size_x = 208, tile_size_y = 480, columns = 9, rows = 1))]
+    pub weed3_layout: Handle<TextureAtlasLayout>,
 
-    #[asset(path = "weed4.png")]
+    #[asset(path = "weed4-Sheet.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub weed4: Handle<Image>,
+
+    #[asset(texture_atlas_layout(tile_size_x = 400, tile_size_y = 480, columns = 9, rows = 1))]
+    pub weed4_layout: Handle<TextureAtlasLayout>,
+
+    #[asset(path = "weed5-Sheet.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub weed5: Handle<Image>,
+
+    #[asset(texture_atlas_layout(tile_size_x = 400, tile_size_y = 480, columns = 9, rows = 1))]
+    pub weed5_layout: Handle<TextureAtlasLayout>,
 
     #[asset(path = "farm.png")]
     #[asset(image(sampler(filter = nearest)))]
@@ -64,6 +79,24 @@ pub struct ImageAssets {
 
     #[asset(texture_atlas_layout(tile_size_x = 64, tile_size_y = 64, columns = 9, rows = 1))]
     pub letterbox_layout: Handle<TextureAtlasLayout>,
+
+    #[asset(path = "modal.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub modal: Handle<Image>,
+
+    #[asset(path = "instructions-Sheet.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub instructions: Handle<Image>,
+
+    #[asset(texture_atlas_layout(tile_size_x = 568, tile_size_y = 259, columns = 7, rows = 1))]
+    pub instructions_layout: Handle<TextureAtlasLayout>,
+
+    #[asset(path = "rose-Sheet.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub rose: Handle<Image>,
+
+    #[asset(texture_atlas_layout(tile_size_x = 100, tile_size_y = 480, columns = 10, rows = 1))]
+    pub rose_layout: Handle<TextureAtlasLayout>,
 
     #[asset(path = "letters-Sheet.png")]
     #[asset(image(sampler(filter = nearest)))]
@@ -91,6 +124,9 @@ pub struct SoundAssets {
 
     #[asset(path = "sfx/lose.ogg")]
     pub lose: Handle<AudioSource>,
+
+    #[asset(path = "sfx/error.ogg")]
+    pub error: Handle<AudioSource>,
 
     #[asset(path = "sfx/menu.ogg")]
     pub menu_music: Handle<AudioSource>,

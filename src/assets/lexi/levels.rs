@@ -14,6 +14,12 @@ fn preload(mut commands: Commands, asset_server: Res<AssetServer>) {
     info!("Loading level data");
     commands.insert_resource(LexiCollection::<LevelLex>::new(
         &asset_server,
+        #[cfg(feature = "dev")]
+        vec![
+            "lexi/levels/levels-dev.json",
+            // ...more level things here,
+        ],
+        #[cfg(not(feature = "dev"))]
         vec![
             "lexi/levels/levels.json",
             // ...more level things here,
