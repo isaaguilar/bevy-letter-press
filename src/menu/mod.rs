@@ -292,6 +292,27 @@ fn change_menu(
                         ),
                         TextInputTextColor(DARK_COLOR.into()),
                     ));
+
+                    parent.spawn((
+                        StateScoped(AppState::Menu),
+                        ShowSetName,
+                        DialogDisplay(dialog.id.clone()),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: Val::Px(220.0),
+                            height: Val::Px(30.0),
+                            left: Val::Px(400.0),
+                            top: Val::Px(455.0),
+                            // border: UiRect::all(Val::Px(5.0)),
+                            padding: UiRect::all(Val::Px(7.0)),
+                            ..default()
+                        },
+                        TextColor(LIGHT_COLOR),
+                        TextFont::from_font(BODY_FONT)
+                            .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 35.)
+                            .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                        Text::new("--------------------"),
+                    ));
                 }
             }
         }

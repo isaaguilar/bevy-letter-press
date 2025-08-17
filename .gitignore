@@ -2,7 +2,7 @@
 Cargo.lock
 .private
 
-/target
+target
 
 /asset_source
 /dist
@@ -10,5 +10,7 @@ Cargo.lock
 *.icns
 *.app/
 *.zip
-.tfstate
+*.tfstate
 .terraform
+.terraform*
+terraform.tfstate*

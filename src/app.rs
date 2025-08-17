@@ -40,6 +40,7 @@ pub fn start() {
                         name: Some(TITLE.into()),
                         resolution: WindowResolution::new(RESOLUTION_WIDTH, RESOLUTION_HEIGHT),
                         fit_canvas_to_parent: true,
+
                         ..default()
                     }),
                     ..default()
@@ -49,6 +50,7 @@ pub fn start() {
                     ..default()
                 }),
         )
+        .insert_resource(ClearColor(DARK_COLOR))
         .init_state::<AppState>()
         .insert_resource(DisplayLanguage::default())
         .insert_resource(InteractionRateLimit::default())

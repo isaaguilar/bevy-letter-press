@@ -53,6 +53,7 @@ pub(super) fn plugin(app: &mut App) {
         .insert_resource(SfxMusicVolume::default())
         .insert_resource(ActiveKey::default())
         .insert_resource(Affirmations::default())
+        .insert_resource(GlobalMusicFadeTimer::default())
         .insert_resource(TimeSpent::default())
         .insert_resource(PlayerScore::default())
         .insert_resource(DisplayAffirmation::default())
@@ -78,6 +79,7 @@ pub(super) fn plugin(app: &mut App) {
             ),
         )
         .add_systems(Update, wack_weed.run_if(on_event::<RemoveWeed>))
+        .add_systems(OnExit(AppState::LoadNextLevel), add_fade_in)
         .add_systems(
             Update,
             (
@@ -122,7 +124,8 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (update_high_scoreboard_top_five).run_if(in_state(AppState::LoadNextLevel)),
+            (lower_volume_between_levels, update_high_scoreboard_top_five)
+                .run_if(in_state(AppState::LoadNextLevel)),
         )
         .add_systems(OnEnter(AppState::GameOver), setup_game_over)
         .add_systems(
@@ -182,7 +185,7 @@ pub struct SfxMusicVolume {
 impl Default for SfxMusicVolume {
     fn default() -> Self {
         Self {
-            music: false,
+            music: true,
             sfx: true,
         }
     }
@@ -221,6 +224,39 @@ pub fn toggle_sfx_on_click(
                 atlas.index = 1;
             }
         }
+    }
+}
+
+#[derive(Component)]
+pub struct BetweenLevelMusic;
+
+pub fn lower_volume_between_levels(
+    time: Res<Time>,
+    mut global_music_fade_timer: ResMut<GlobalMusicFadeTimer>,
+    mut music: Query<(Entity, &mut AudioSink, &MusicVolume), With<BetweenLevelMusic>>,
+) {
+    if let Ok((entity, mut audio_controls, volume)) = music.single_mut() {
+        info!("lowering volume");
+        let current_volume = audio_controls.volume().to_linear();
+
+        global_music_fade_timer.0.tick(time.delta());
+        if global_music_fade_timer.0.just_finished() {
+            if current_volume >= volume.0.1 {
+                audio_controls.set_volume(bevy::audio::Volume::Linear(current_volume - 0.01));
+            }
+        }
+    }
+}
+
+pub fn add_fade_in(
+    mut commands: Commands,
+    mut music: Query<(Entity, &mut AudioSink, &MusicVolume), With<BetweenLevelMusic>>,
+) {
+    if let Ok((entity, mut audio_controls, volume)) = music.single_mut() {
+        commands
+            .entity(entity)
+            .remove::<BetweenLevelMusic>()
+            .insert(FadeInMusic::new(0.2));
     }
 }
 
@@ -300,17 +336,20 @@ pub fn volume_toggle_hud(
 }
 
 #[derive(Component)]
-pub struct MusicVolume(pub f32);
+pub struct MusicVolume(pub (f32, f32));
 
 pub fn music_toggle(
+    mut commands: Commands,
     sfx_music_volume: Res<SfxMusicVolume>,
-    music: Query<(&mut AudioSink, &MusicVolume)>,
+    music: Query<(Entity, &mut AudioSink, &MusicVolume)>,
 ) {
-    for (mut audio, music_volume) in music {
+    for (entity, mut audio, music_volume) in music {
         if !sfx_music_volume.music {
             audio.set_volume(audio::Volume::Linear(0.0));
         } else {
-            audio.set_volume(audio::Volume::Linear(music_volume.0));
+            commands
+                .entity(entity)
+                .insert(FadeInMusic::new(music_volume.0.0));
         }
     }
 }
@@ -319,21 +358,15 @@ pub fn sfx_setup(
     mut commands: Commands,
     sound_assets: Res<SoundAssets>,
     music: Query<&mut AudioSink, With<GameMusic>>,
-    waiting_music_query: Query<Entity, With<WaitingMusic>>,
 ) {
     if music.single().is_err() {
         commands.spawn((
             GameMusic,
-            // MusicVolume(1.2),
-            MusicVolume(0.0),
-            FadeInMusic::new(1.2),
+            MusicVolume((0.2, 0.07)),
+            FadeInMusic::new(0.2),
             PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.0)),
             AudioPlayer(sound_assets.music.clone()),
         ));
-    }
-
-    if let Ok(entity) = waiting_music_query.single() {
-        commands.entity(entity).despawn();
     }
 }
 
@@ -379,6 +412,49 @@ pub fn setup(
                     Node {
                         position_type: PositionType::Absolute,
                         display: Display::Flex,
+                        justify_self: JustifySelf::Center,
+                        flex_direction: FlexDirection::Column,
+                        width: Val::Px(100.0),
+
+                        border: UiRect::all(Val::Px(2.0)),
+                        top: Val::Px(425.0),
+                        left: Val::Px(500.0),
+                        ..default()
+                    },
+                    BorderColor(LIGHT_COLOR),
+                    BorderRadius::MAX,
+                ))
+                .with_children(|p| {
+                    p.spawn(
+                        ((
+                            Node {
+                                width: Val::Percent(100.0),
+                                ..default()
+                            },
+                            BorderRadius::MAX,
+                            Pickable::default(),
+                            Text::default(),
+                            BackgroundColor(DARK_COLOR),
+                            TextLayout::default().with_justify(JustifyText::Center),
+                            children![(
+                                TextColor(LIGHT_COLOR),
+                                TextFont::from_font(BODY_FONT)
+                                    .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
+                                    .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                                Pickable::IGNORE,
+                                TextSpan::new(format!("Back")),
+                            )],
+                        )),
+                    )
+                    .observe(back_to_menu_and_reset);
+                });
+
+            parent
+                .spawn((
+                    StateScoped(AppState::Game),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        display: Display::Flex,
                         flex_direction: FlexDirection::Column,
                         width: Val::Percent(100.0),
                         top: Val::Px(210.0),
@@ -391,8 +467,15 @@ pub fn setup(
                     p.spawn((
                         TextColor(LIGHT_COLOR),
                         TextFont::from_font(BODY_FONT)
+                            .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 15.),
+                        Text("You win!".into()),
+                    ));
+                    p.spawn(spacer());
+                    p.spawn((
+                        TextColor(LIGHT_COLOR),
+                        TextFont::from_font(BODY_FONT)
                             .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
-                        Text("No level data found".into()),
+                        Text("Thanks for playing.".into()),
                     ));
                 });
         });
@@ -1733,17 +1816,31 @@ fn fade_out_and_despawn(
     }
 }
 
+#[derive(Resource)]
+pub struct GlobalMusicFadeTimer(pub Timer);
+
+impl Default for GlobalMusicFadeTimer {
+    fn default() -> Self {
+        Self(Timer::from_seconds(0.006, TimerMode::Repeating))
+    }
+}
+
 fn fade_in_music(
     mut commands: Commands,
+    time: Res<Time>,
+    mut global_music_fade_timer: ResMut<GlobalMusicFadeTimer>,
     music_query: Query<(Entity, &mut AudioSink, &FadeInMusic)>,
 ) {
     for (entity, mut audio_controls, fade_in_volume) in music_query {
         let current_volume = audio_controls.volume().to_linear();
 
-        if current_volume >= fade_in_volume.0.to_linear() {
-            commands.entity(entity).remove::<FadeInMusic>();
-        } else {
-            audio_controls.set_volume(bevy::audio::Volume::Linear(current_volume + 0.001));
+        global_music_fade_timer.0.tick(time.delta());
+        if global_music_fade_timer.0.just_finished() {
+            if current_volume >= fade_in_volume.0.to_linear() {
+                commands.entity(entity).remove::<FadeInMusic>();
+            } else {
+                audio_controls.set_volume(bevy::audio::Volume::Linear(current_volume + 0.001));
+            }
         }
     }
 }
@@ -1761,7 +1858,9 @@ fn scene_transition(
         return;
     };
 
-    if *next_scene == AppState::GameOver {
+    if *next_scene == AppState::GameOver
+        || (*next_scene != AppState::Game && *next_scene != AppState::LoadNextLevel)
+    {
         if let Ok(entity) = game_music.single_mut() {
             commands
                 .entity(entity)
@@ -1807,8 +1906,7 @@ fn waiting_music(
     if music.single().is_err() {
         commands.spawn((
             WaitingMusic,
-            // MusicVolume(0.25),
-            MusicVolume(0.0),
+            MusicVolume((0.25, 0.075)),
             FadeInMusic::new(0.25),
             PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.0)),
             AudioPlayer(sound_assets.menu_music.clone()),
@@ -2021,7 +2119,12 @@ fn setup_load_next_level(
     leaderboard_name: Res<LeaderboardName>,
     mut leaderboard_level: ResMut<LeaderboardLevelSelected>,
     mut advance: ResMut<Advance>,
+    mut music: Query<(Entity, &mut AudioSink, &MusicVolume)>,
 ) {
+    if let Ok((entity, _, _)) = music.single() {
+        commands.entity(entity).insert(BetweenLevelMusic);
+    }
+
     advance.0 = true;
     let mut score = 0;
     let time_spent_text = match time_spent.0.get(&current_level_id.0) {
