@@ -7,6 +7,11 @@ use crate::app::{
 use crate::assets::custom::{ImageAssets, SoundAssets};
 use crate::assets::lexi::game_over::GameOverLex;
 use crate::assets::lexi::levels::{LevelInfo, LevelLex};
+use crate::leaderboard::{
+    GetHighScore, HighScoreboardTopFive, LeaderboardLevel, LeaderboardLevelSelected, PostHighScore,
+    update_high_scoreboard_top_five,
+};
+use crate::menu::LeaderboardName;
 use crate::util::handles::BODY_FONT;
 use crate::{camera, game};
 use bevy::ecs::system::Commands;
@@ -31,7 +36,6 @@ use rand::prelude::IndexedMutRandom;
 use rand::seq::IndexedRandom;
 use serde::Deserialize;
 
-const LEADERBOARD_URL: &'static str = env!("LEADERBOARD_URL");
 const MAX_VISIBLE_WEEDS: u32 = 10;
 const MIN_PLACEMENT_DISTANCE: f32 = 35.0;
 
@@ -40,7 +44,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_event::<SceneChange>()
         .add_event::<RemoveWeed>()
         .add_event::<GrowWeed>()
-        .add_plugins((TextInputPlugin, HttpClientPlugin))
+        .add_plugins((HttpClientPlugin))
         .insert_resource(LoadedLevel::default())
         .insert_resource(GameTimer::default())
         .insert_resource(GameStatus::default())
@@ -50,7 +54,9 @@ pub(super) fn plugin(app: &mut App) {
         .insert_resource(ActiveKey::default())
         .insert_resource(Affirmations::default())
         .insert_resource(TimeSpent::default())
+        .insert_resource(PlayerScore::default())
         .insert_resource(DisplayAffirmation::default())
+        .insert_resource(Advance::default())
         .insert_resource(KeyMap::default())
         .insert_resource(KeyPosition::default())
         .insert_resource(WeedTracker::default())
@@ -109,15 +115,20 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnEnter(AppState::LoadNextLevel), setup_load_next_level)
         .add_systems(
             Update,
-            load_next_level.run_if(
-                on_event::<KeyboardInput>
+            load_next_level_on_spacebar.run_if(
+                input_just_pressed(KeyCode::Space)
                     .and(in_state(AppState::LoadNextLevel).and(in_state(GameState::NextLevel))),
             ),
+        )
+        .add_systems(
+            Update,
+            (update_high_scoreboard_top_five).run_if(in_state(AppState::LoadNextLevel)),
         )
         .add_systems(OnEnter(AppState::GameOver), setup_game_over)
         .add_systems(
             Update,
-            load_menu.run_if(on_event::<KeyboardInput>.and(in_state(AppState::GameOver))),
+            restart_game_at_menu
+                .run_if(input_just_pressed(KeyCode::Space).and(in_state(AppState::GameOver))),
         )
         .add_systems(
             Update,
@@ -138,6 +149,7 @@ pub enum GameState {
     NotRunning,
     LevelComplete,
     NextLevel,
+    Reset,
 }
 
 #[derive(Component)]
@@ -235,6 +247,7 @@ pub fn volume_toggle_hud(
             .spawn((
                 VolumeToggleMarker,
                 VolumeToggleMusicMarker,
+                ZIndex(10),
                 Node {
                     position_type: PositionType::Absolute,
                     display: Display::Flex,
@@ -261,6 +274,7 @@ pub fn volume_toggle_hud(
             .spawn((
                 VolumeToggleMarker,
                 VolumeToggleSfxMarker,
+                ZIndex(10),
                 Node {
                     position_type: PositionType::Absolute,
                     display: Display::Flex,
@@ -325,7 +339,8 @@ pub fn sfx_setup(
 
 pub fn setup(
     mut loaded_level: ResMut<LoadedLevel>,
-    current_level_id: Res<CurrentLevelId>,
+    mut current_level_id: ResMut<CurrentLevelId>,
+    mut advance: ResMut<Advance>,
     levels: Res<Assets<LevelLex>>,
     mut commands: Commands,
     image_assets: Res<ImageAssets>,
@@ -335,8 +350,14 @@ pub fn setup(
     mut game_timer: ResMut<GameTimer>,
     mut active_key: ResMut<ActiveKey>,
     mut time_spent: ResMut<TimeSpent>,
+    mut player_score: ResMut<PlayerScore>,
     hide_instructions: Res<HideInstructions>,
 ) {
+    if advance.0 {
+        current_level_id.0 += 1;
+        advance.0 = false;
+    }
+    player_score.0.clear();
     time_spent.0.clear();
     weeds_left.reset();
     game_state.set(GameState::NotRunning);
@@ -471,6 +492,49 @@ pub fn setup(
                 ..default()
             },
         ));
+
+        parent
+            .spawn((
+                StateScoped(GameState::NotRunning),
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::Flex,
+                    justify_self: JustifySelf::Center,
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(100.0),
+
+                    border: UiRect::all(Val::Px(2.0)),
+                    top: Val::Px(425.0),
+                    left: Val::Px(500.0),
+                    ..default()
+                },
+                BorderColor(LIGHT_COLOR),
+                BorderRadius::MAX,
+            ))
+            .with_children(|p| {
+                p.spawn(
+                    ((
+                        Node {
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BorderRadius::MAX,
+                        Pickable::default(),
+                        Text::default(),
+                        BackgroundColor(DARK_COLOR),
+                        TextLayout::default().with_justify(JustifyText::Center),
+                        children![(
+                            TextColor(LIGHT_COLOR),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
+                                .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                            Pickable::IGNORE,
+                            TextSpan::new(format!("Back")),
+                        )],
+                    )),
+                )
+                .observe(back_to_menu);
+            });
 
         parent
             .spawn((
@@ -756,6 +820,9 @@ pub struct HealthbarDisplay;
 
 #[derive(Resource, Default)]
 pub struct TimeSpent(pub HashMap<usize, f32>);
+
+#[derive(Resource, Default)]
+pub struct PlayerScore(pub HashMap<usize, u32>);
 
 #[derive(Resource, Default)]
 pub struct WeedTracker {
@@ -1835,6 +1902,49 @@ fn setup_credits(mut commands: Commands, hud: Res<Hud>) {
                 Node {
                     position_type: PositionType::Absolute,
                     display: Display::Flex,
+                    justify_self: JustifySelf::Center,
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(100.0),
+                    // height: Val::Px(40.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    top: Val::Px(425.0),
+                    left: Val::Px(500.0),
+                    ..default()
+                },
+                BorderColor(LIGHT_COLOR),
+                BorderRadius::MAX,
+            ))
+            .with_children(|p| {
+                p.spawn(
+                    ((
+                        Node {
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BorderRadius::MAX,
+                        Pickable::default(),
+                        Text::default(),
+                        BackgroundColor(DARK_COLOR),
+                        TextLayout::default().with_justify(JustifyText::Center),
+                        children![(
+                            TextColor(LIGHT_COLOR),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
+                                .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                            Pickable::IGNORE,
+                            TextSpan::new(format!("Back")),
+                        )],
+                    )),
+                )
+                .observe(back_to_menu);
+            });
+
+        parent
+            .spawn((
+                StateScoped(AppState::Credits),
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::Flex,
                     flex_direction: FlexDirection::Column,
                     width: Val::Percent(100.0),
                     top: Val::Px(55.0),
@@ -1872,23 +1982,32 @@ fn setup_credits(mut commands: Commands, hud: Res<Hud>) {
                     Text("Music\n-----\nIsa Aguilar\n\n".into()),
                 ));
             });
-
-        parent
-            .spawn((
-                StateScoped(AppState::Credits),
-                Node {
-                    position_type: PositionType::Absolute,
-                    height: Val::Px(2.0 * 480. - 100.),
-                    width: Val::Px(2.0 * 600. - 200.),
-
-                    ..default()
-                },
-            ))
-            .with_children(|p| {
-                p.spawn(button("Menu".into()));
-            })
-            .observe(go_to_menu);
     });
+}
+
+#[derive(Resource, Default)]
+pub struct Advance(pub bool);
+
+fn back_to_menu(
+    _: Trigger<Pointer<Click>>,
+    mut commands: Commands,
+    mut game_state: ResMut<NextState<GameState>>,
+) {
+    game_state.set(GameState::Reset);
+    commands.send_event(SceneChange(AppState::Menu));
+}
+
+fn back_to_menu_and_reset(
+    _: Trigger<Pointer<Click>>,
+    mut commands: Commands,
+    mut game_state: ResMut<NextState<GameState>>,
+    mut current_level_id: ResMut<CurrentLevelId>,
+    mut advance: ResMut<Advance>,
+) {
+    current_level_id.0 = 0;
+    advance.0 = false;
+    game_state.set(GameState::Reset);
+    commands.send_event(SceneChange(AppState::Menu));
 }
 
 fn setup_load_next_level(
@@ -1896,9 +2015,14 @@ fn setup_load_next_level(
     hud: Res<Hud>,
     mut game_state: ResMut<NextState<GameState>>,
     time_spent: Res<TimeSpent>,
+    mut player_score: ResMut<PlayerScore>,
     current_level_id: Res<CurrentLevelId>,
     loaded_level: Res<LoadedLevel>,
+    leaderboard_name: Res<LeaderboardName>,
+    mut leaderboard_level: ResMut<LeaderboardLevelSelected>,
+    mut advance: ResMut<Advance>,
 ) {
+    advance.0 = true;
     let mut score = 0;
     let time_spent_text = match time_spent.0.get(&current_level_id.0) {
         Some(t) => {
@@ -1916,9 +2040,144 @@ fn setup_load_next_level(
         None => String::new(),
     };
 
-    let score_text = format!("Your score is: {}\n\n(The lower the better)", score);
+    player_score.0.insert(current_level_id.0, score);
+    leaderboard_level.0 = Some(current_level_id.0);
+
+    // Posting score to leaderboard
+    commands.send_event(PostHighScore);
+
+    let score_text = format!("Your score is: {}", score);
 
     commands.entity(hud.0).with_children(|parent| {
+        parent
+            .spawn((
+                StateScoped(AppState::LoadNextLevel),
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::Flex,
+                    justify_self: JustifySelf::Center,
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(100.0),
+
+                    border: UiRect::all(Val::Px(2.0)),
+                    top: Val::Px(425.0),
+                    left: Val::Px(500.0),
+                    ..default()
+                },
+                BorderColor(LIGHT_COLOR),
+                BorderRadius::MAX,
+            ))
+            .with_children(|p| {
+                p.spawn(
+                    ((
+                        Node {
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BorderRadius::MAX,
+                        Pickable::default(),
+                        Text::default(),
+                        BackgroundColor(DARK_COLOR),
+                        TextLayout::default().with_justify(JustifyText::Center),
+                        children![(
+                            TextColor(LIGHT_COLOR),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
+                                .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                            Pickable::IGNORE,
+                            TextSpan::new(format!("Back")),
+                        )],
+                    )),
+                )
+                .observe(back_to_menu);
+            });
+
+        parent
+            .spawn((
+                StateScoped(AppState::LoadNextLevel),
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::Flex,
+                    justify_self: JustifySelf::Center,
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(100.0),
+
+                    border: UiRect::all(Val::Px(2.0)),
+                    top: Val::Px(350.0),
+                    left: Val::Px(500.0),
+                    ..default()
+                },
+                BorderColor(LIGHT_COLOR),
+                BorderRadius::MAX,
+            ))
+            .with_children(|p| {
+                p.spawn(
+                    ((
+                        Node {
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BorderRadius::MAX,
+                        Pickable::default(),
+                        Text::default(),
+                        BackgroundColor(DARK_COLOR),
+                        TextLayout::default().with_justify(JustifyText::Center),
+                        children![(
+                            TextColor(LIGHT_COLOR),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
+                                .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                            Pickable::IGNORE,
+                            TextSpan::new(format!("Retry")),
+                        )],
+                    )),
+                )
+                .observe(retry_level);
+            });
+
+        parent
+            .spawn((
+                StateScoped(AppState::LoadNextLevel),
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::Flex,
+                    justify_self: JustifySelf::Center,
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(100.0),
+
+                    border: UiRect::all(Val::Px(2.0)),
+                    top: Val::Px(275.0),
+                    left: Val::Px(500.0),
+                    ..default()
+                },
+                BorderColor(LIGHT_COLOR),
+                BorderRadius::MAX,
+            ))
+            .with_children(|p| {
+                p.spawn(
+                    ((
+                        Node {
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BorderRadius::MAX,
+                        Pickable::default(),
+                        Text::default(),
+                        BackgroundColor(DARK_COLOR),
+                        TextLayout::default().with_justify(JustifyText::Center),
+                        children![(
+                            TextColor(LIGHT_COLOR),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
+                                .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                            Pickable::IGNORE,
+                            TextSpan::new(format!("Next")),
+                        )],
+                    )),
+                )
+                .observe(load_next_level);
+            });
+
         parent
             .spawn((
                 StateScoped(AppState::LoadNextLevel),
@@ -1928,25 +2187,38 @@ fn setup_load_next_level(
                     flex_direction: FlexDirection::Column,
                     width: Val::Percent(100.0),
                     top: Val::Px(55.0),
-                    left: Val::Px(120.0),
+                    left: Val::Px(80.0),
                     align_items: AlignItems::Start,
                     ..default()
                 },
+                Pickable::IGNORE,
             ))
             .with_children(|p| {
+                let congrats = match &leaderboard_name.0 {
+                    Some(name) => format!("Great job, {}!", name),
+                    None => String::from("Great Job!"),
+                };
+
                 p.spawn((
                     TextColor(LIGHT_COLOR),
                     TextFont::from_font(BODY_FONT)
-                        .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
-                    Text("Great Job!".into()),
+                        .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 20.),
+                    Text(congrats),
                 ));
                 p.spawn(spacer());
-                p.spawn((
-                    TextColor(LIGHT_COLOR),
-                    TextFont::from_font(BODY_FONT)
-                        .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
-                    Text("Press any key to continue".into()),
-                ));
+
+                if leaderboard_name.0.is_none() {
+                    p.spawn((
+                        TextColor(LIGHT_COLOR),
+                        TextFont::from_font(BODY_FONT)
+                            .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 35.),
+                        Text(
+                            "No name is set for the leaderboard.\nGo back to the menu to update."
+                                .into(),
+                        ),
+                    ));
+                }
+
                 p.spawn(spacer());
                 p.spawn((
                     TextColor(LIGHT_COLOR),
@@ -1966,14 +2238,23 @@ fn setup_load_next_level(
                     TextColor(LIGHT_COLOR),
                     TextFont::from_font(BODY_FONT)
                         .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
-                    Text("---------------".into()),
+                    Text(score_text),
                 ));
                 p.spawn(spacer());
                 p.spawn((
+                    Pickable::IGNORE,
                     TextColor(LIGHT_COLOR),
                     TextFont::from_font(BODY_FONT)
                         .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
-                    Text(score_text),
+                    Text("\n      Top Five\n-------------------\n".into()),
+                ));
+                p.spawn((
+                    Pickable::IGNORE,
+                    HighScoreboardTopFive,
+                    TextColor(LIGHT_COLOR),
+                    TextFont::from_font(BODY_FONT)
+                        .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
+                    Text("".into()),
                 ));
             });
     });
@@ -1986,6 +2267,92 @@ fn setup_game_over(
 ) {
     game_state.set(GameState::NotRunning);
     commands.entity(hud.0).with_children(|parent| {
+        parent
+            .spawn((
+                StateScoped(AppState::GameOver),
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::Flex,
+                    justify_self: JustifySelf::Center,
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(100.0),
+
+                    border: UiRect::all(Val::Px(2.0)),
+                    top: Val::Px(425.0),
+                    left: Val::Px(500.0),
+                    ..default()
+                },
+                BorderColor(LIGHT_COLOR),
+                BorderRadius::MAX,
+            ))
+            .with_children(|p| {
+                p.spawn(
+                    ((
+                        Node {
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BorderRadius::MAX,
+                        Pickable::default(),
+                        Text::default(),
+                        BackgroundColor(DARK_COLOR),
+                        TextLayout::default().with_justify(JustifyText::Center),
+                        children![(
+                            TextColor(LIGHT_COLOR),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
+                                .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                            Pickable::IGNORE,
+                            TextSpan::new(format!("Back")),
+                        )],
+                    )),
+                )
+                .observe(back_to_menu_and_reset);
+            });
+
+        parent
+            .spawn((
+                StateScoped(AppState::GameOver),
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::Flex,
+                    justify_self: JustifySelf::Center,
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(100.0),
+
+                    border: UiRect::all(Val::Px(2.0)),
+                    top: Val::Px(350.0),
+                    left: Val::Px(500.0),
+                    ..default()
+                },
+                BorderColor(LIGHT_COLOR),
+                BorderRadius::MAX,
+            ))
+            .with_children(|p| {
+                p.spawn(
+                    ((
+                        Node {
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BorderRadius::MAX,
+                        Pickable::default(),
+                        Text::default(),
+                        BackgroundColor(DARK_COLOR),
+                        TextLayout::default().with_justify(JustifyText::Center),
+                        children![(
+                            TextColor(LIGHT_COLOR),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 30.)
+                                .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                            Pickable::IGNORE,
+                            TextSpan::new(format!("Retry")),
+                        )],
+                    )),
+                )
+                .observe(retry_level);
+            });
+
         parent
             .spawn((
                 StateScoped(AppState::GameOver),
@@ -2014,42 +2381,63 @@ fn setup_game_over(
                         .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
                     Text("The weeds took over the garden".into()),
                 ));
-                p.spawn((
-                    TextColor(LIGHT_COLOR),
-                    TextFont::from_font(BODY_FONT)
-                        .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
-                    Text("Press any key to continue".into()),
-                ));
             });
     });
 }
 
 fn load_next_level(
-    mut events: EventReader<KeyboardInput>,
+    _: Trigger<Pointer<Click>>,
+    mut advance: ResMut<Advance>,
     mut current_level_id: ResMut<CurrentLevelId>,
     mut game_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
 ) {
-    for event in events.read() {
-        if event.state != ButtonState::Released {
-            current_level_id.0 += 1;
-            game_state.set(GameState::NotRunning);
-            commands.send_event(SceneChange(AppState::Game));
-        }
+    // for event in events.read() {
+    // if event.state != ButtonState::Released {
+    if advance.0 {
+        current_level_id.0 += 1;
+        advance.0 = false;
     }
+    game_state.set(GameState::NotRunning);
+    commands.send_event(SceneChange(AppState::Game));
+    // }
+    // }
 }
 
-fn load_menu(
-    mut events: EventReader<KeyboardInput>,
+fn load_next_level_on_spacebar(
+    mut advance: ResMut<Advance>,
     mut current_level_id: ResMut<CurrentLevelId>,
+    mut game_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
 ) {
-    for event in events.read() {
-        if event.state != ButtonState::Released {
-            current_level_id.0 = 0;
-            commands.send_event(SceneChange(AppState::Menu));
-        }
+    if advance.0 {
+        current_level_id.0 += 1;
+        advance.0 = false;
     }
+    game_state.set(GameState::NotRunning);
+    commands.send_event(SceneChange(AppState::Game));
+}
+
+fn retry_level(
+    _: Trigger<Pointer<Click>>,
+    mut advance: ResMut<Advance>,
+    mut game_state: ResMut<NextState<GameState>>,
+    mut commands: Commands,
+) {
+    advance.0 = false;
+    game_state.set(GameState::NotRunning);
+    commands.send_event(SceneChange(AppState::Game));
+}
+
+fn restart_game_at_menu(
+    // mut current_level_id: ResMut<CurrentLevelId>,
+    mut advance: ResMut<Advance>,
+    mut game_state: ResMut<NextState<GameState>>,
+    mut commands: Commands,
+) {
+    advance.0 = false;
+    game_state.set(GameState::NotRunning);
+    commands.send_event(SceneChange(AppState::Game));
 }
 
 #[derive(Resource, Default, Eq, PartialEq)]

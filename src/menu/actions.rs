@@ -24,3 +24,7 @@ pub fn menu_selection(mut change_menu: EventWriter<ChangeMenu>, menu: impl Into<
 pub fn show_credits(mut commands: Commands) {
     commands.send_event(SceneChange(AppState::Credits));
 }
+
+pub fn show_leaderboard(mut commands: Commands) {
+    commands.send_event(SceneChange(AppState::LeaderboardSelection));
+}

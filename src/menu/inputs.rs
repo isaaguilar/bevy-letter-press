@@ -51,8 +51,8 @@ fn keyboard_menu_selection_system(
         }
         None => (false, false, false, false, false, false),
     };
-    let up_key_pressed = up || keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
-    let down_key_pressed = down || keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
+    let up_key_pressed = up || keyboard_input.any_pressed([KeyCode::ArrowUp]);
+    let down_key_pressed = down || keyboard_input.any_pressed([KeyCode::ArrowDown]);
 
     let dialog = match &dialog_message.opt {
         Some(d) => d,
@@ -133,6 +133,9 @@ fn keyboard_selection(
             "show_credits" => {
                 actions::show_credits(commands);
             }
+            "show_leaderboard" => {
+                actions::show_leaderboard(commands);
+            }
 
             "english" | "spanish" => {
                 actions::language_selection(display_language, action);
@@ -178,6 +181,10 @@ pub fn click_start_game(_: Trigger<Pointer<Click>>, commands: Commands) {
 
 pub fn click_show_credits(_: Trigger<Pointer<Click>>, commands: Commands) {
     actions::show_credits(commands);
+}
+
+pub fn click_show_leaderboard(_: Trigger<Pointer<Click>>, commands: Commands) {
+    actions::show_leaderboard(commands);
 }
 
 pub fn click_language_selection(

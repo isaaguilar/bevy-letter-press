@@ -8,7 +8,7 @@ pub const RESOLUTION_HEIGHT: f32 = 480.0;
 pub const AFTER_LOADING_STATE: AppState = AppState::Menu;
 pub const RUNNING_SPEED: f32 = 250.0;
 
-use crate::{assets, game, menu, util};
+use crate::{assets, game, leaderboard, menu, util};
 
 pub const DARK_COLOR: Color = Color::srgb(24. / 255., 51. / 255., 5. / 255.);
 pub const LIGHT_COLOR: Color = Color::srgb(214. / 255., 227. / 255., 195. / 255.);
@@ -20,6 +20,8 @@ pub enum AppState {
     #[default]
     Preload,
     Loading,
+    LeaderboardSelection,
+    Leaderboard,
     Menu,
     Game,
     GameOver,
@@ -64,6 +66,7 @@ pub fn start() {
             menu::Menu,
             assets::plugin,
             game::plugin,
+            leaderboard::plugin,
             util::plugin,
             #[cfg(feature = "dev")]
             crate::dev_tools::plugin,

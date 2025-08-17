@@ -3,21 +3,38 @@ use crate::app::DARK_COLOR;
 use crate::app::DialogDisplay;
 use crate::app::DisplayLanguage;
 use crate::app::LIGHT_COLOR;
+use crate::app::RESOLUTION_HEIGHT;
 use crate::app::RESOLUTION_WIDTH;
 use crate::assets::custom::ImageAssets;
 use crate::assets::lexi::menu::{Choice, MenuData};
+use crate::util::handles::BODY_FONT;
+use bevy::ecs::entity;
+use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy_aspect_ratio_mask::Hud;
+use bevy_simple_text_input::TextInput;
+use bevy_simple_text_input::TextInputPlugin;
+use bevy_simple_text_input::TextInputTextColor;
+use bevy_simple_text_input::TextInputTextFont;
+use bevy_simple_text_input::TextInputValue;
 
 mod actions;
 mod inputs;
-mod layouts;
+pub mod layouts;
 
 pub struct Menu;
 
 impl Plugin for Menu {
     fn build(&self, app: &mut App) {
         app.insert_resource(ActiveMenu::default());
+
+        app.add_plugins((TextInputPlugin))
+            .insert_resource(LeaderboardName::default())
+            .add_systems(
+                Update,
+                leaderboard_name.run_if(in_state(AppState::Menu).and(on_event::<KeyboardInput>)),
+            );
+
         app.add_event::<ChangeMenu>();
 
         app.add_systems(OnEnter(AppState::Menu), menu_setup)
@@ -105,6 +122,7 @@ fn change_menu(
     dialog_display_query: Query<(Entity, &DialogDisplay), With<DialogDisplay>>,
     hud: Res<Hud>,
     image_assets: Res<ImageAssets>,
+    mut leaderboard_name: ResMut<LeaderboardName>,
 ) {
     info!("Spawning menu");
     let hud_entity = hud.0;
@@ -160,6 +178,122 @@ fn change_menu(
                     ..default()
                 },
             ));
+
+            parent.spawn((
+                StateScoped(AppState::Menu),
+                DialogDisplay(dialog.id.clone()),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(15.),
+                    top: Val::Px(436.),
+                    // margin: UiRect::new(Val::Px(0.0), Val::Px(2.0), Val::Px(5.0), Val::Px(-120.0)),
+                    ..default()
+                },
+                TextColor(LIGHT_COLOR),
+                TextFont::from_font(BODY_FONT)
+                    .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 35.)
+                    .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                Text::new("Enter name to compete on Leaderboard:"),
+            ));
+
+            match &leaderboard_name.0 {
+                Some(name) => {
+                    parent.spawn((
+                        StateScoped(AppState::Menu),
+                        ShowSetName,
+                        DialogDisplay(dialog.id.clone()),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: Val::Px(220.0),
+                            height: Val::Px(30.0),
+                            left: Val::Px(400.0),
+                            top: Val::Px(436.0),
+                            // border: UiRect::all(Val::Px(5.0)),
+                            padding: UiRect::all(Val::Px(7.0)),
+                            ..default()
+                        },
+                        TextColor(LIGHT_COLOR),
+                        TextFont::from_font(BODY_FONT)
+                            .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 35.)
+                            .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                        Text::new(name),
+                    ));
+
+                    parent.spawn((
+                        StateScoped(AppState::Menu),
+                        ShowSetName,
+                        DialogDisplay(dialog.id.clone()),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: Val::Px(220.0),
+                            height: Val::Px(30.0),
+                            left: Val::Px(400.0),
+                            top: Val::Px(455.0),
+                            // border: UiRect::all(Val::Px(5.0)),
+                            padding: UiRect::all(Val::Px(7.0)),
+                            ..default()
+                        },
+                        TextColor(LIGHT_COLOR),
+                        TextFont::from_font(BODY_FONT)
+                            .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 35.)
+                            .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                        Text::new("--------------------"),
+                    ));
+
+                    parent
+                        .spawn((
+                            StateScoped(AppState::Menu),
+                            ShowSetName,
+                            DialogDisplay(dialog.id.clone()),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                width: Val::Px(30.0),
+                                height: Val::Px(30.0),
+                                left: Val::Px(570.0),
+                                top: Val::Px(433.0),
+                                // border: UiRect::all(Val::Px(5.0)),
+                                // padding: UiRect::all(Val::Px(7.0)),
+                                ..default()
+                            },
+                            Pickable::default(),
+                            BorderColor(LIGHT_COLOR),
+                            BorderRadius::MAX,
+                            BackgroundColor(LIGHT_COLOR),
+                            TextColor(DARK_COLOR),
+                            TextLayout::default().with_justify(JustifyText::Center),
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.)
+                                .with_line_height(bevy::text::LineHeight::RelativeToFont(2.5)),
+                            Text::new("X"),
+                        ))
+                        .observe(remove_name);
+                }
+                None => {
+                    parent.spawn((
+                        StateScoped(AppState::Menu),
+                        DialogDisplay(dialog.id.clone()),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: Val::Px(220.0),
+                            height: Val::Px(30.0),
+                            left: Val::Px(410.0),
+                            top: Val::Px(433.0),
+                            // border: UiRect::all(Val::Px(5.0)),
+                            padding: UiRect::all(Val::Px(7.0)),
+                            ..default()
+                        },
+                        BorderColor(LIGHT_COLOR),
+                        BorderRadius::MAX,
+                        BackgroundColor(LIGHT_COLOR),
+                        TextInput,
+                        TextInputTextFont(
+                            TextFont::from_font(BODY_FONT)
+                                .with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
+                        ),
+                        TextInputTextColor(DARK_COLOR.into()),
+                    ));
+                }
+            }
         }
 
         parent
@@ -192,6 +326,9 @@ fn change_menu(
                                             "show_credits" => {
                                                 button.observe(inputs::click_show_credits);
                                             }
+                                            "show_leaderboard" => {
+                                                button.observe(inputs::click_show_leaderboard);
+                                            }
 
                                             "english" | "spanish" => {
                                                 button
@@ -220,6 +357,72 @@ fn change_menu(
     });
 
     return;
+}
+
+#[derive(Component)]
+struct ShowSetName;
+
+fn remove_name(
+    _: Trigger<Pointer<Click>>,
+    mut leaderboard_name: ResMut<LeaderboardName>,
+    query: Query<Entity, With<ShowSetName>>,
+    mut commands: Commands,
+    hud: Res<Hud>,
+) {
+    leaderboard_name.clear();
+
+    for entity in query {
+        commands.entity(entity).despawn();
+    }
+
+    commands.entity(hud.0).with_children(|parent| {
+        parent.spawn((
+            StateScoped(AppState::Menu),
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(220.0),
+                height: Val::Px(30.0),
+                left: Val::Px(410.0),
+                top: Val::Px(433.0),
+                // border: UiRect::all(Val::Px(5.0)),
+                padding: UiRect::all(Val::Px(7.0)),
+                ..default()
+            },
+            BorderColor(LIGHT_COLOR),
+            BorderRadius::MAX,
+            BackgroundColor(LIGHT_COLOR),
+            TextInput,
+            TextInputTextFont(
+                TextFont::from_font(BODY_FONT).with_font_size(RESOLUTION_HEIGHT * 6. / 8. / 25.),
+            ),
+            TextInputTextColor(DARK_COLOR.into()),
+        ));
+    });
+}
+
+fn leaderboard_name(
+    mut events: EventReader<KeyboardInput>,
+    text_input_query: Query<&TextInputValue>,
+    mut leaderboard_name: ResMut<LeaderboardName>,
+) {
+    for event in events.read() {
+        if event.key_code == KeyCode::Enter {
+            return;
+        }
+        leaderboard_name.0 = match text_input_query.single() {
+            Ok(t) => Some(t.0.clone()),
+            Err(_) => None,
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct LeaderboardName(pub Option<String>);
+
+impl LeaderboardName {
+    pub fn clear(&mut self) {
+        self.0 = None;
+    }
 }
 
 fn move_choice_marker(

@@ -80,6 +80,13 @@ pub struct ImageAssets {
     #[asset(texture_atlas_layout(tile_size_x = 64, tile_size_y = 64, columns = 9, rows = 1))]
     pub letterbox_layout: Handle<TextureAtlasLayout>,
 
+    #[asset(path = "leaves-Sheet.png")]
+    #[asset(image(sampler(filter = nearest)))]
+    pub leaves: Handle<Image>,
+
+    #[asset(texture_atlas_layout(tile_size_x = 64, tile_size_y = 64, columns = 13, rows = 1))]
+    pub leaves_layout: Handle<TextureAtlasLayout>,
+
     #[asset(path = "modal.png")]
     #[asset(image(sampler(filter = nearest)))]
     pub modal: Handle<Image>,
